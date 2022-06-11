@@ -1,0 +1,11 @@
+{
+    "type": "record",
+    "namespace": "com.project",
+    "name": "Calculus",
+    "fields": [
+        {
+            "name": "expression",
+            "type": "string"
+        }
+    ]
+}

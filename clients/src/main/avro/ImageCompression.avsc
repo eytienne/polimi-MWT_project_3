@@ -1,0 +1,18 @@
+{
+    "type": "record",
+    "namespace": "com.project",
+    "name": "ImageCompression",
+    "fields": [
+        {
+            "name": "url",
+            "type": {
+                "type": "array",
+                "items": "string"
+            }
+        },
+        {
+            "name": "quality",
+            "type": "float"
+        }
+    ]
+}

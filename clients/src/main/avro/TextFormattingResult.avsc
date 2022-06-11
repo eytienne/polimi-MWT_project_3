@@ -1,0 +1,11 @@
+{
+    "type": "record",
+    "namespace": "com.project",
+    "name": "TextFormattingResult",
+    "fields": [
+        {
+            "name": "formatted",
+            "type": "string"
+        }
+    ]
+}

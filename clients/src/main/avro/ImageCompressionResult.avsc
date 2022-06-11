@@ -1,0 +1,11 @@
+{
+    "type": "record",
+    "namespace": "com.project",
+    "name": "ImageCompressionResult",
+    "fields": [
+        {
+            "name": "directory",
+            "type": "string"
+        }
+    ]
+}

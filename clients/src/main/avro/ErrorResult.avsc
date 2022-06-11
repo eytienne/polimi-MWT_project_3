@@ -1,0 +1,15 @@
+{
+    "type": "record",
+    "namespace": "com.project",
+    "name": "ErrorResult",
+    "fields": [
+        {
+            "name": "code",
+            "type": "int"
+        },
+        {
+            "name": "message",
+            "type": "string"
+        }
+    ]
+}

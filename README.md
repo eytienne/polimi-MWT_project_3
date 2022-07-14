@@ -26,3 +26,9 @@ client.py compress-image https://i.imgur.com/gQgPVcr.jpeg 0.9
 - /admin - Kafka administration/setup.
 - /back - Worker pool management.
 - /client - Python CLI to query operations.
+
+## Build
+
+```
+./gradlew installDist
+```

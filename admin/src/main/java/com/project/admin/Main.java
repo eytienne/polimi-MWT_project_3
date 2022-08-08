@@ -40,11 +40,16 @@ public class Main {
 						.orElse(defaultTopicReplicationFactor));
 		try {
 			adminClient.createTopics(List.of(
-					new NewTopic("task-submitted", topicNumPartitions, topicReplicationFactor),
-					new NewTopic("task-completed", topicNumPartitions, topicReplicationFactor))).all().get();
+					new NewTopic("calculus", topicNumPartitions, topicReplicationFactor),
+					new NewTopic("image-compression", topicNumPartitions, topicReplicationFactor),
+					new NewTopic("text-formatting", topicNumPartitions, topicReplicationFactor),
+					new NewTopic("error-result", topicNumPartitions, topicReplicationFactor),
+					new NewTopic("calculus-result", topicNumPartitions, topicReplicationFactor),
+					new NewTopic("image-compression-result", topicNumPartitions, topicReplicationFactor),
+					new NewTopic("text-formatting-result", topicNumPartitions, topicReplicationFactor))).all().get();
 		} catch (ExecutionException e) {
 			var cause = e.getCause();
-			if(!(cause instanceof TopicExistsException)) {
+			if (!(cause instanceof TopicExistsException)) {
 				throw e;
 			}
 			e.printStackTrace();

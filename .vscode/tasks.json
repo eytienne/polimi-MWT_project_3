@@ -1,0 +1,50 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"type": "gradle",
+			"id": "/home/eytienne/Documents/Polimi/MIDDLEWARE_TECHNOLOGIES/MWT_project_3assembleDistmy-kafka-clients",
+			"script": "assembleDist",
+			"description": "Assembles the main distributions",
+			"group": "build",
+			"project": "my-kafka-clients",
+			"buildFile": "/home/eytienne/Documents/Polimi/MIDDLEWARE_TECHNOLOGIES/MWT_project_3/build.gradle",
+			"rootProject": "my-kafka-clients",
+			"projectFolder": "/home/eytienne/Documents/Polimi/MIDDLEWARE_TECHNOLOGIES/MWT_project_3",
+			"workspaceFolder": "/home/eytienne/Documents/Polimi/MIDDLEWARE_TECHNOLOGIES/MWT_project_3",
+			"args": "",
+			"javaDebug": false,
+			"problemMatcher": [
+				"$gradle"
+			],
+			"label": "gradle: assembleDist"
+		},
+		{
+			"type": "cppbuild",
+			"label": "C/C++: g++ build runner file",
+			"command": "/usr/bin/clang++",
+			"args": [
+				"-fdiagnostics-color=always",
+				"-g",
+				"-std=c++20",
+				"-I${workspaceFolder}/back/include",
+				"-L/usr/local/lib",
+				"-o",
+				"${workspaceFolder}/back/bin/runner",
+				"${workspaceFolder}/back/src/runner.cpp",
+				"-lrdkafka",
+				"-lserdes++",
+				"-lserdes",
+				"-lavrocpp"
+			],
+			"options": {
+				"cwd": "${fileDirname}"
+			},
+			"problemMatcher": [
+				"$gcc"
+			],
+			"group": "build",
+			"detail": "compiler: /usr/bin/g++"
+		}
+	]
+}

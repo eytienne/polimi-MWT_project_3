@@ -30,5 +30,20 @@ client.py compress-image https://i.imgur.com/gQgPVcr.jpeg 0.9
 ## Build
 
 ```
-./gradlew installDist
+./gradlew generateAvroJava installDist
+
+cd back
+make build
 ```
+
+## Notes
+
+Pool runners will be deployed on several machines through MPI. Partinioning will allow load paralellism between machines and MPI will be used to consume messages in a round-robin fashion between processes of a same machine.
+
+mpirun -mca plm_rsh_args "-l adam" --host 172.26.0.2:4,172.26.0.3:4 -npernode 4 /app/bin/exe
+
+## Useful commands
+
+docker-compose logs --follow --tail 500 broker
+
+kafka-console-consumer --bootstrap-server localhost:29092 --include '(calculus|image-compression|text-formatting)' --from-beginning

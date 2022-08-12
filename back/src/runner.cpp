@@ -1,4 +1,12 @@
-#include "avro/index.hh"
+
+#include "avro/Calculus.hh"
+#include "avro/CalculusResult.hh"
+#include "avro/ErrorResult.hh"
+#include "avro/WordCount.hh"
+#include "avro/WordCountResult.hh"
+#include "avro/ImageCompression.hh"
+#include "avro/ImageCompressionResult.hh"
+
 #include <avro/Compiler.hh>
 #include <avro/Decoder.hh>
 #include <avro/Encoder.hh>
@@ -8,9 +16,28 @@
 #include <kafka/KafkaConsumer.h>
 #include <kafka/KafkaProducer.h>
 #include <string>
+#include <variant>
 #include <vector>
 using namespace std;
 using namespace std::string_literals;
+
+
+namespace c {
+    using Task = std::variant<c::Calculus, c::ImageCompression, c::WordCount>;
+    using TaskResult = std::variant<c::CalculusResult, c::ImageCompressionResult, c::WordCountResult>;
+}
+
+namespace avro {
+	template <typename... TArgs>
+	struct codec_traits<std::variant<TArgs...>> {
+		static void encode(Encoder& e, const std::variant<TArgs...>& v) {
+			std::visit([&e](auto &&arg) { avro::encode(e, arg); }, v);
+		}
+		static void decode(Decoder& d, std::variant<TArgs...>& v) {
+			std::visit([&d](auto &&arg) { avro::decode(d, arg); }, v);
+		}
+	};
+}
 
 namespace app {
 
@@ -65,11 +92,13 @@ int main(int argc, char **argv) {
 	auto avroPath = argv[2];
 
 	dotenv::init(configPath);
+
 	kafka::Properties props({
 		{"bootstrap.servers", getenv("bootstrap.servers")},
-		{"auto.offset.reset", "earliest"},
 		{"transactional.id", "my-transactional-id"},
+		{"auto.offset.reset", "earliest"},
 		{"group.id", "runner-pool"},
+		{"max.poll.records", "1"},
 		{"isolation.level", "read_committed"},
 	});
 
@@ -85,10 +114,9 @@ int main(int argc, char **argv) {
 
 		kafka::clients::KafkaConsumer consumer(props);
 
-		set<kafka::Topic> topics = {"calculus", "image-compression", "text-formatting" };
+		set<kafka::Topic> topics = {"calculus", "image-compression", "word-count" };
 		for (auto topic : topics) {
 			std::cout << "% Reading messages from topic: " << topic << std::endl;
-			// topics.insert(topic);
 		}
 		consumer.subscribe(topics);
 
@@ -96,96 +124,102 @@ int main(int argc, char **argv) {
 			auto records = consumer.poll(std::chrono::milliseconds(1000));
 			std::cout << "% " << records.size() << " record(s) fetched"
 					  << std::endl;
-			producer.beginTransaction();
-			for (const auto &record : records) {
-				if (record.value().size() == 0) {
-					return 0;
-				}
-
-				if (!record.error()) {
-					std::cout << "% Got a new message..." << std::endl;
-					std::cout << "    Topic    : " << record.topic()
-							  << std::endl;
-					std::cout << "    Partition: " << record.partition()
-							  << std::endl;
-					std::cout << "    Offset   : " << record.offset()
-							  << std::endl;
-					std::cout
-						<< "    Timestamp: " << record.timestamp().toString()
-						<< std::endl;
-					std::cout << "    Headers  : "
-							  << kafka::toString(record.headers()) << std::endl;
-					std::cout << "    Key   [" << record.key().toString() << "]"
-							  << std::endl;
-					auto value = record.value();
-					std::cout << "    Value [" << value.toString() << "]"
-							  << std::endl;
-
-					c::Task *task;
-					c::Task *task2 = new c::Task();
-					// cout << "Step 1: " << task << endl;
-					Serdes::Schema *_schema = NULL;
-					auto dsize = serdesDecoder->deserialize(&_schema, &task, value.data(), value.size(), app::errstr);
-					auto result = std::visit(app::overloaded {
-						[](const c::Calculus &calculus) {
-							c::CalculusResult result;
-							result.expression = calculus.expression + " resolved";
-							return c::TaskResult(result);
-						},
-						[](const c::ImageCompression &imageCompression) {
-							c::ImageCompressionResult result;
-							result.directory = app::join(imageCompression.url, "_") + " (compressed)"s;
-							return c::TaskResult(result);
-						},
-						[](const c::TextFormatting &textFormatting) {
-							c::TextFormattingResult result;
-							result.formatted = textFormatting.text + " (formatted with " +
-											textFormatting.formatting + ")";
-							return c::TaskResult(result);
-						},
-					}, *task);
-
-					auto producerTopic = record.topic() + "-result"s;
-					auto schema = Serdes::Schema::get(serdesEncoder, producerTopic + "-value", app::errstr);
-					if (!schema) {
-      					throw new runtime_error("Failed to get schema: " + app::errstr);
-					}
-					vector<char> out;
-					serdesEncoder->serialize(schema, &result, out, app::errstr);
-					kafka::Value returnValue(out.data(), out.size());
-					kafka::Key returnKey;
-
-					kafka::clients::producer::ProducerRecord producerRecord(
-						producerTopic, returnKey, returnValue);
-
-					auto recordHeaders = record.headers();
-					auto clientIdHeaderIterator = std::find_if(
-						recordHeaders.begin(), recordHeaders.end(),
-						[](kafka::Header hh) { return hh.key == "client-id"; });
-					if (clientIdHeaderIterator != recordHeaders.end()) {
-						auto clientIdHeader = *clientIdHeaderIterator;
-						producerRecord.headers().push_back(clientIdHeader);
+			try {
+				producer.beginTransaction();
+				for (const auto &record : records) {
+					if (record.value().size() == 0) {
+						return 0;
 					}
 
-					producer.syncSend(producerRecord);
-				} else {
-					// Errors are typically informational, thus no special
-					// handling is required
-					std::cerr << record.toString() << std::endl;
+					if (!record.error()) {
+						std::cout << "% Got a new message..." << std::endl;
+						std::cout << "    Topic    : " << record.topic()
+								<< std::endl;
+						std::cout << "    Partition: " << record.partition()
+								<< std::endl;
+						std::cout << "    Offset   : " << record.offset()
+								<< std::endl;
+						std::cout
+							<< "    Timestamp: " << record.timestamp().toString()
+							<< std::endl;
+						std::cout << "    Headers  : "
+								<< kafka::toString(record.headers()) << std::endl;
+						std::cout << "    Key   [" << record.key().toString() << "]"
+								<< std::endl;
+						auto value = record.value();
+						std::cout << "    Value [" << value.toString() << "]"
+								<< std::endl;
+
+						c::Task *task;
+						c::Task *task2 = new c::Task();
+						Serdes::Schema *_schema = NULL;
+						auto dsize = serdesDecoder->deserialize(&_schema, &task, value.data(), value.size(), app::errstr);
+						auto result = std::visit(app::overloaded {
+							[](const c::Calculus &calculus) {
+								c::CalculusResult result;
+								result.expression = calculus.expression + " resolved";
+								return c::TaskResult(result);
+							},
+							[](const c::ImageCompression &imageCompression) {
+								c::ImageCompressionResult result;
+								result.directory = app::join(imageCompression.url, "_") + " (compressed)"s;
+								return c::TaskResult(result);
+							},
+							[](const c::WordCount &wordCount) {
+								c::WordCountResult result;
+								// result.counts =
+								return c::TaskResult(result);
+							},
+						}, *task);
+
+						auto producerTopic = record.topic() + "-result"s;
+						auto schema = Serdes::Schema::get(serdesEncoder, producerTopic + "-value", app::errstr);
+						if (!schema) {
+							throw new runtime_error("Failed to get schema: " + app::errstr);
+						}
+						vector<char> out;
+						serdesEncoder->serialize(schema, &result, out, app::errstr);
+						kafka::Value returnValue(out.data(), out.size());
+						kafka::Key returnKey;
+
+						std::cout << "    Producer topic [" << producerTopic << "]" << endl;
+
+
+						kafka::clients::producer::ProducerRecord producerRecord(
+							producerTopic, returnKey, returnValue);
+
+						auto recordHeaders = record.headers();
+						auto clientIdHeaderIterator = std::find_if(
+							recordHeaders.begin(), recordHeaders.end(),
+							[](kafka::Header hh) { return hh.key == "client-id"; });
+						if (clientIdHeaderIterator != recordHeaders.end()) {
+							auto clientIdHeader = *clientIdHeaderIterator;
+							producerRecord.headers().push_back(clientIdHeader);
+						}
+
+						producer.syncSend(producerRecord);
+					} else {
+						// Errors are typically informational, thus no special
+						// handling is required
+						std::cerr << record.toString() << std::endl;
+					}
 				}
+				auto topicPartitions = app::vector_map(
+					records, [](kafka::clients::consumer::ConsumerRecord record) {
+						return pair{record.topic(), record.partition()};
+					});
+				producer.sendOffsetsToTransaction(
+					consumer.endOffsets(
+						set(topicPartitions.begin(), topicPartitions.end())),
+					consumer.groupMetadata(), std::chrono::milliseconds(60000));
+				producer.commitTransaction();
+			} catch(const kafka::KafkaException& e) {
+				std::cerr << e.what() << endl;
+				producer.abortTransaction();
 			}
-			auto topicPartitions = app::vector_map(
-				records, [](kafka::clients::consumer::ConsumerRecord record) {
-					return pair{record.topic(), record.partition()};
-				});
-			producer.sendOffsetsToTransaction(
-				consumer.endOffsets(
-					set(topicPartitions.begin(), topicPartitions.end())),
-				consumer.groupMetadata(), std::chrono::milliseconds(60000));
-			producer.commitTransaction();
 		}
 	} catch (const std::exception &e) {
-		cerr << "Exception occured: " << e.what() << endl;
+		cerr << "Fatal exception occured: " << e.what() << endl;
 	}
 	delete serdesConf;
 	delete serdesDecoder;

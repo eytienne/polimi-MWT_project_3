@@ -17,8 +17,8 @@
  */
 
 
-#ifndef SRC_AVRO_TEXTFORMATTINGRESULT_HH_4090747368__H_
-#define SRC_AVRO_TEXTFORMATTINGRESULT_HH_4090747368__H_
+#ifndef SRC_AVRO_WORDCOUNT_HH_3759926484__H_
+#define SRC_AVRO_WORDCOUNT_HH_3759926484__H_
 
 
 #include <sstream>
@@ -28,20 +28,20 @@
 #include "avro/Decoder.hh"
 
 namespace c {
-struct TextFormattingResult {
-    std::string formatted;
-    TextFormattingResult() :
-        formatted(std::string())
+struct WordCount {
+    std::vector<std::string > url;
+    WordCount() :
+        url(std::vector<std::string >())
         { }
 };
 
 }
 namespace avro {
-template<> struct codec_traits<c::TextFormattingResult> {
-    static void encode(Encoder& e, const c::TextFormattingResult& v) {
-        avro::encode(e, v.formatted);
+template<> struct codec_traits<c::WordCount> {
+    static void encode(Encoder& e, const c::WordCount& v) {
+        avro::encode(e, v.url);
     }
-    static void decode(Decoder& d, c::TextFormattingResult& v) {
+    static void decode(Decoder& d, c::WordCount& v) {
         if (avro::ResolvingDecoder *rd =
             dynamic_cast<avro::ResolvingDecoder *>(&d)) {
             const std::vector<size_t> fo = rd->fieldOrder();
@@ -49,14 +49,14 @@ template<> struct codec_traits<c::TextFormattingResult> {
                 it != fo.end(); ++it) {
                 switch (*it) {
                 case 0:
-                    avro::decode(d, v.formatted);
+                    avro::decode(d, v.url);
                     break;
                 default:
                     break;
                 }
             }
         } else {
-            avro::decode(d, v.formatted);
+            avro::decode(d, v.url);
         }
     }
 };

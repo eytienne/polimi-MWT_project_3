@@ -1,0 +1,14 @@
+{
+    "type": "record",
+    "namespace": "com.project",
+    "name": "WordCountResult",
+    "fields": [
+        {
+            "name": "counts",
+            "type": {
+                "type": "map",
+                "values": "int"
+            }
+        }
+    ]
+}

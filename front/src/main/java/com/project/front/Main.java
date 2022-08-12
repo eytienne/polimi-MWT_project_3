@@ -27,11 +27,12 @@ import com.project.CalculusResult;
 import com.project.ErrorResult;
 import com.project.ImageCompression;
 import com.project.ImageCompressionResult;
-import com.project.TextFormatting;
-import com.project.TextFormattingResult;
+import com.project.WordCount;
+import com.project.WordCountResult;
 
 import io.confluent.kafka.serializers.AbstractKafkaSchemaSerDeConfig;
 import io.confluent.kafka.serializers.KafkaAvroDeserializer;
+import io.confluent.kafka.serializers.KafkaAvroDeserializerConfig;
 import io.confluent.kafka.serializers.KafkaAvroSerializer;
 import picocli.CommandLine;
 import picocli.CommandLine.Command;
@@ -75,15 +76,19 @@ public class Main {
         return 0;
     }
 
-    @Command(name = "format-text")
-    public int textFormattingCommand(
-            @Parameters(paramLabel = "FORMATTING") String formatting,
-            @Parameters(paramLabel = "TEXT") String text) {
-        TextFormattingResult result = handleRecord(new ProducerRecord<>(
-                "text-formatting",
+    @Command(name = "count-words")
+    public int wordCountCommand(
+            @Parameters(paramLabel = "URL", arity = "1..*") URL[] urls) {
+        WordCountResult result = handleRecord(new ProducerRecord<>(
+                "word-count",
                 null,
-                TextFormatting.newBuilder().setFormatting(formatting).setText(text).build()), "text-formatting-result");
-        System.out.println(String.format("Formatted: \n%s\n", result.getFormatted()));
+                WordCount.newBuilder()
+                        .setUrl(Stream.of(urls).map(URL::toString).collect(Collectors.toUnmodifiableList())).build()),
+                "word-count-result");
+        System.out.println("Counts:");
+        for (var entry : result.getCounts().entrySet()) {
+            System.out.println(String.format("%s: %s", entry.getKey(), entry.getValue()));
+        }
         return 0;
     }
 
@@ -96,28 +101,29 @@ public class Main {
             producerRecord.headers().add("client-id", clientId.getBytes(StandardCharsets.UTF_8));
             producer.send(producerRecord).get();
 
-            System.out.println();
-            System.out.println("DEBUG polling from " + successResultTopic + " being " + clientId);
+            System.out.println("Waiting for the result from polling from " + successResultTopic + " being " + clientId);
 
             var time = Duration.ofSeconds(0);
             while (time.toMillis() < timeout * 1000) {
-                var duration = Duration.ofMillis(1000);
+                var duration = Duration.ofMillis(2000);
                 ConsumerRecords<String, SpecificRecordBase> records = consumer.poll(duration);
                 time = time.plus(duration);
-                System.out.println("% " + records.count() + " record(s) fetched");
+                System.out.println("Assigment: " + String.join(",",
+                        consumer.assignment().stream().map((tp) -> tp.toString()).sorted().toArray(String[]::new)));
+                // System.out.println("% " + records.count() + " record(s) fetched");
                 for (var consumerRecord : records) {
-                    System.out.println("DEBUG " + consumerRecord.value().toString());
-                    // if (new String(consumerRecord.headers().lastHeader("client-id").value(), StandardCharsets.UTF_8)
-                    //         .equals(clientId)) {
-                    //     var value = consumerRecord.value();
-                    //     if (value instanceof ErrorResult) {
-                    //         var errorValue = (ErrorResult) value;
-                    //         System.err.println(
-                    //                 String.format("Error %d: \"%s\"", errorValue.getCode(), errorValue.getMessage()));
-                    //         throw new BusinessException("Error result");
-                    //     }
-                    //     return (T) value;
-                    // }
+                    System.out.println("DEBUG received after " + time + ":");
+                    if (new String(consumerRecord.headers().lastHeader("client-id").value(), StandardCharsets.UTF_8)
+                            .equals(clientId)) {
+                        var value = consumerRecord.value();
+                        if (value instanceof ErrorResult) {
+                            var errorValue = (ErrorResult) value;
+                            System.err.println(
+                                    String.format("Error %d: \"%s\"", errorValue.getCode(), errorValue.getMessage()));
+                            throw new BusinessException("Error result");
+                        }
+                        return (T) value;
+                    }
                 }
             }
             throw new BusinessException("Timeout expired");
@@ -134,22 +140,26 @@ public class Main {
             try (var inputStream = classLoader.getResourceAsStream("librdkafka.config")) {
                 props.load(inputStream);
             }
+            props.put("zookeeper.session.timeout.ms", 30000);
+
             props.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, StringSerializer.class);
-            props.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class);
             props.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, KafkaAvroSerializer.class);
+            props.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class);
+
             props.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, KafkaAvroDeserializer.class);
-            // props.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class);
             props.put(ConsumerConfig.ISOLATION_LEVEL_CONFIG, "read_committed");
-            props.put(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, false);
             props.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "latest");
-            props.put(ConsumerConfig.GROUP_ID_CONFIG, clientId);
+            // props.put(ConsumerConfig.GROUP_ID_CONFIG, "test-group");
+            props.put(ConsumerConfig.GROUP_ID_CONFIG, "group_" + clientId);
+
             props.put(AbstractKafkaSchemaSerDeConfig.AUTO_REGISTER_SCHEMAS, false);
             props.put(AbstractKafkaSchemaSerDeConfig.USE_LATEST_VERSION, true);
+            props.put(AbstractKafkaSchemaSerDeConfig.LATEST_COMPATIBILITY_STRICT, false);
+            props.put(KafkaAvroDeserializerConfig.SPECIFIC_AVRO_READER_CONFIG, true);
 
             try (
                     KafkaProducer<String, SpecificRecordBase> producer = this.producer = new KafkaProducer<>(props);
                     KafkaConsumer<String, SpecificRecordBase> consumer = this.consumer = new KafkaConsumer<>(props)) {
-
                 return new CommandLine.RunLast().execute(parseResult);
             }
         } catch (IOException e) {
@@ -167,24 +177,5 @@ public class Main {
                 .setExecutionStrategy(main::executionStrategy)
                 .execute(args);
         System.exit(exitCode);
-    }
-
-    // TODO drop it
-    public static String represent(byte[] byte1) {
-        StringBuilder buffer = new StringBuilder();
-        for (int i = 0; i < byte1.length; i++) {
-            if (byte1[i] >= 32 && byte1[i] != 92 && byte1[i] != 127)
-                buffer.append((char) byte1[i]);
-            else {
-                String temp;
-                if (byte1[i] == 92) {
-                    buffer.append("\\\\");
-                } else {
-                    temp = String.format("[\\0x%02x]", byte1[i]);
-                    buffer.append(temp);
-                }
-            }
-        }
-        return buffer.toString();
     }
 }

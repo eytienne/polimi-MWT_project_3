@@ -1,0 +1,14 @@
+{
+    "type": "record",
+    "namespace": "com.project",
+    "name": "WordCount",
+    "fields": [
+        {
+            "name": "url",
+            "type": {
+                "type": "array",
+                "items": "string"
+            }
+        }
+    ]
+}

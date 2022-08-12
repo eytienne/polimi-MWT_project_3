@@ -42,11 +42,11 @@ public class Main {
 			adminClient.createTopics(List.of(
 					new NewTopic("calculus", topicNumPartitions, topicReplicationFactor),
 					new NewTopic("image-compression", topicNumPartitions, topicReplicationFactor),
-					new NewTopic("text-formatting", topicNumPartitions, topicReplicationFactor),
+					new NewTopic("word-count", topicNumPartitions, topicReplicationFactor),
 					new NewTopic("error-result", topicNumPartitions, topicReplicationFactor),
 					new NewTopic("calculus-result", topicNumPartitions, topicReplicationFactor),
 					new NewTopic("image-compression-result", topicNumPartitions, topicReplicationFactor),
-					new NewTopic("text-formatting-result", topicNumPartitions, topicReplicationFactor))).all().get();
+					new NewTopic("word-count-result", topicNumPartitions, topicReplicationFactor))).all().get();
 		} catch (ExecutionException e) {
 			var cause = e.getCause();
 			if (!(cause instanceof TopicExistsException)) {

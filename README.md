@@ -3,7 +3,7 @@ Middleware technologies (2021-2022) Project 3: Compute infrastructure
 
 Tasks with computation times:
 - image compression (t = 100)
-- text formatting (t = 40)
+- word count (t = 40)
 - some calculus (t = 20)
 
 ## Getting started
@@ -46,4 +46,4 @@ mpirun -mca plm_rsh_args "-l adam" --host 172.26.0.2:4,172.26.0.3:4 -npernode 4 
 
 docker-compose logs --follow --tail 500 broker
 
-kafka-console-consumer --bootstrap-server localhost:29092 --include '(calculus|image-compression|text-formatting)' --from-beginning
+kafka-console-consumer --bootstrap-server localhost:29092 --include '(calculus|image-compression|word-count)' --from-beginning

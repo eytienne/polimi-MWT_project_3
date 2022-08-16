@@ -1,4 +1,11 @@
 
+#include <mpi.h>
+// import in this order
+#include "./mpi-runner.hh"
+#include "./mpi.hh"
+#include <libserdes/serdescpp.h>
+#include <libserdes/serdescpp-avro.h>
+
 #include "avro/Calculus.hh"
 #include "avro/CalculusResult.hh"
 #include "avro/ErrorResult.hh"
@@ -15,6 +22,7 @@
 #include <iostream>
 #include <kafka/KafkaConsumer.h>
 #include <kafka/KafkaProducer.h>
+#include <regex>
 #include <string>
 #include <variant>
 #include <vector>
@@ -41,7 +49,7 @@ namespace avro {
 
 namespace app {
 
-static string errstr = "";
+string errstr = "";
 
 // https://en.cppreference.com/w/cpp/utility/variant/visit
 template<class... Ts> struct overloaded : Ts... { using Ts::operator()...; };
@@ -79,58 +87,72 @@ auto vector_map(vector<T> data, mapFunction function) {
 
 }
 
-#include <libserdes/serdescpp.h>
-#include <libserdes/serdescpp-avro.h>
 
 int main(int argc, char **argv) {
-	if (argc != 3) {
-		std::cerr << "Usage: " << argv[0]
-				  << " <librdkafka.config path> <avro path>" << endl;
-		return 1;
-	}
-	auto configPath = argv[1];
-	auto avroPath = argv[2];
+	MPI_Init(NULL, NULL);
 
-	dotenv::init(configPath);
+	MPI_Comm_rank(MPI_COMM_WORLD, &mpi::comm_rank);
+	MPI_Comm_size(MPI_COMM_WORLD, &mpi::comm_size);
 
-	kafka::Properties props({
-		{"bootstrap.servers", getenv("bootstrap.servers")},
-		{"transactional.id", "my-transactional-id"},
-		{"auto.offset.reset", "earliest"},
-		{"group.id", "runner-pool"},
-		{"max.poll.records", "1"},
-		{"isolation.level", "read_committed"},
-	});
+    mpi_runner::init();
 
-	auto serdesConf = Serdes::Conf::create();
-	serdesConf->set("schema.registry.url", getenv("schema.registry.url"), app::errstr);
-
-	Serdes::Avro<c::Task> *serdesDecoder = Serdes::Avro<c::Task>::create(serdesConf, app::errstr);
-	Serdes::Avro<c::TaskResult> *serdesEncoder = Serdes::Avro<c::TaskResult>::create(serdesConf, app::errstr);
-
+	Serdes::Conf *serdesConf;
+	Serdes::Avro<c::Task> *serdesDecoder;
+	Serdes::Avro<c::TaskResult> *serdesEncoder;
+	kafka::clients::KafkaProducer *producer;
+	kafka::clients::KafkaConsumer *consumer;
 	try {
-		kafka::clients::KafkaProducer producer(props);
-		producer.initTransactions();
+		ROOT_ONLY {
+			if (argc != 2) {
+				std::cerr << "Usage: " << argv[0]
+						<< " <librdkafka.config path> <avro path>" << endl;
+				return 1;
+			}
+			auto configPath = argv[1];
 
-		kafka::clients::KafkaConsumer consumer(props);
+			dotenv::init(configPath);
 
-		set<kafka::Topic> topics = {"calculus", "image-compression", "word-count" };
-		for (auto topic : topics) {
-			std::cout << "% Reading messages from topic: " << topic << std::endl;
+			kafka::Properties props({
+				{"bootstrap.servers", getenv("bootstrap.servers")},
+				{"transactional.id", "my-transactional-id"},
+				{"auto.offset.reset", "earliest"},
+				{"group.id", "runner-pool"},
+				{"max.poll.records", "1"},
+				{"isolation.level", "read_committed"},
+			});
+
+			serdesConf = Serdes::Conf::create();
+			serdesConf->set("schema.registry.url", getenv("schema.registry.url"), app::errstr);
+
+			serdesDecoder = Serdes::Avro<c::Task>::create(serdesConf, app::errstr);
+			serdesEncoder = Serdes::Avro<c::TaskResult>::create(serdesConf, app::errstr);
+			producer = new kafka::clients::KafkaProducer(props);
+			producer->initTransactions();
+
+			consumer = new kafka::clients::KafkaConsumer(props);
+
+			set<kafka::Topic> topics = {"calculus", "image-compression", "word-count" };
+			for (auto topic : topics) {
+				std::cout << "% Reading messages from topic: " << topic << std::endl;
+			}
+			consumer->subscribe(topics);
 		}
-		consumer.subscribe(topics);
-
 		while (true) {
-			auto records = consumer.poll(std::chrono::milliseconds(1000));
-			std::cout << "% " << records.size() << " record(s) fetched"
-					  << std::endl;
-			try {
-				producer.beginTransaction();
-				for (const auto &record : records) {
-					if (record.value().size() == 0) {
-						return 0;
+			ROOT_ONLY {
+				auto records = consumer->poll(std::chrono::milliseconds(1000));
+				std::cout << "% " << records.size() << " record(s) fetched"
+						<< std::endl;
+				try {
+					producer->beginTransaction();
+					if (records.empty()) {
+						producer->abortTransaction();
+						continue;
 					}
-
+					// only one by consumer configuration
+					const auto &record = records[0];
+					if (record.value().size() == 0) {
+						return 2;
+					}
 					if (!record.error()) {
 						std::cout << "% Got a new message..." << std::endl;
 						std::cout << "    Topic    : " << record.topic()
@@ -150,10 +172,19 @@ int main(int argc, char **argv) {
 						std::cout << "    Value [" << value.toString() << "]"
 								<< std::endl;
 
-						c::Task *task;
-						c::Task *task2 = new c::Task();
-						Serdes::Schema *_schema = NULL;
-						auto dsize = serdesDecoder->deserialize(&_schema, &task, value.data(), value.size(), app::errstr);
+						c::Task task;
+						auto recordTopic = record.topic();
+						if (recordTopic == "calculus") {
+							task = c::Calculus();
+						} else if (recordTopic == "image-compression") {
+							task = c::ImageCompression();
+						} else if (recordTopic == "word-count") {
+							task = c::WordCount();
+						} else {
+							throw runtime_error("Consumer type unknown");
+						}
+						Serdes::Schema *schemaD = nullptr;
+						auto dsize = serdesDecoder->deserialize(&schemaD, &task, value.data(), value.size(), app::errstr);
 						auto result = std::visit(app::overloaded {
 							[](const c::Calculus &calculus) {
 								c::CalculusResult result;
@@ -167,23 +198,22 @@ int main(int argc, char **argv) {
 							},
 							[](const c::WordCount &wordCount) {
 								c::WordCountResult result;
-								// result.counts =
+								result.counts = mpi_runner::run_word_count(wordCount.url);
 								return c::TaskResult(result);
 							},
-						}, *task);
+						}, task);
 
 						auto producerTopic = record.topic() + "-result"s;
-						auto schema = Serdes::Schema::get(serdesEncoder, producerTopic + "-value", app::errstr);
-						if (!schema) {
-							throw new runtime_error("Failed to get schema: " + app::errstr);
+						auto schemaE = Serdes::Schema::get(serdesEncoder, producerTopic + "-value", app::errstr);
+						if (!schemaE) {
+							throw new runtime_error("Failed to get schemaE: " + app::errstr);
 						}
 						vector<char> out;
-						serdesEncoder->serialize(schema, &result, out, app::errstr);
+						serdesEncoder->serialize(schemaE, &result, out, app::errstr);
 						kafka::Value returnValue(out.data(), out.size());
 						kafka::Key returnKey;
 
 						std::cout << "    Producer topic [" << producerTopic << "]" << endl;
-
 
 						kafka::clients::producer::ProducerRecord producerRecord(
 							producerTopic, returnKey, returnValue);
@@ -197,31 +227,43 @@ int main(int argc, char **argv) {
 							producerRecord.headers().push_back(clientIdHeader);
 						}
 
-						producer.syncSend(producerRecord);
+						producer->syncSend(producerRecord);
 					} else {
 						// Errors are typically informational, thus no special
 						// handling is required
 						std::cerr << record.toString() << std::endl;
 					}
+
+					auto topicPartitions = app::vector_map(
+						records, [](kafka::clients::consumer::ConsumerRecord record) {
+							return pair{record.topic(), record.partition()};
+						});
+					producer->sendOffsetsToTransaction(
+						consumer->endOffsets(
+							set(topicPartitions.begin(), topicPartitions.end())),
+						consumer->groupMetadata(), std::chrono::milliseconds(60000));
+					producer->commitTransaction();
+				} catch(const kafka::KafkaException& e) {
+					std::cerr << e.what() << endl;
+					producer->abortTransaction();
 				}
-				auto topicPartitions = app::vector_map(
-					records, [](kafka::clients::consumer::ConsumerRecord record) {
-						return pair{record.topic(), record.partition()};
-					});
-				producer.sendOffsetsToTransaction(
-					consumer.endOffsets(
-						set(topicPartitions.begin(), topicPartitions.end())),
-					consumer.groupMetadata(), std::chrono::milliseconds(60000));
-				producer.commitTransaction();
-			} catch(const kafka::KafkaException& e) {
-				std::cerr << e.what() << endl;
-				producer.abortTransaction();
+			}
+			NON_ROOT_ONLY {
+				mpi_runner::run_non_root();
 			}
 		}
 	} catch (const std::exception &e) {
 		cerr << "Fatal exception occured: " << e.what() << endl;
 	}
-	delete serdesConf;
-	delete serdesDecoder;
-	delete serdesEncoder;
+	ROOT_ONLY {
+		delete serdesConf;
+		delete serdesDecoder;
+		delete serdesEncoder;
+		delete producer;
+		delete consumer;
+	}
+
+	mpi_runner::finalize();
+
+	MPI_Finalize();
 }

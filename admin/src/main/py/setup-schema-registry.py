@@ -16,9 +16,9 @@ for filename in sorted(glob.glob('*.avsc', root_dir=dirname)):
     with open(f'{dirname}/{filename}', 'r') as file:
         parsed = json.load(file)
         name = parsed['name']
-        subject = re.sub(r'(?<!^)(?=[A-Z])', '-', name).lower()
+        subject = re.sub(r'(?<!^)(?=[A-Z])', '-', name).lower() + "-value"
         schema = Schema(json.dumps(parsed), 'AVRO')
         client.register_schema(subject, schema)
         rschema = client.lookup_schema(subject, schema)
-        print(f'{subject} schema registered {rschema.schema_id}')
+        print(f'{name} schema registered {rschema.schema_id}')
 

@@ -14,10 +14,6 @@
 #include "avro/ImageCompression.hh"
 #include "avro/ImageCompressionResult.hh"
 
-#include <avro/Compiler.hh>
-#include <avro/Decoder.hh>
-#include <avro/Encoder.hh>
-#include <avro/ValidSchema.hh>
 #include <dotenv/dotenv.h>
 #include <iostream>
 #include <kafka/KafkaConsumer.h>
